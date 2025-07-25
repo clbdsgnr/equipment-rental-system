@@ -1,10 +1,5 @@
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-
-export const supabase = createClientComponentClient({ url: supabaseUrl, key: supabaseAnonKey })
-
+// Este é um novo arquivo para definir seus tipos de banco de dados,
+// tornando-os reutilizáveis para ambos os clientes Supabase.
 export type Database = {
   public: {
     Tables: {

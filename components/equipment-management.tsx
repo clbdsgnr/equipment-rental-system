@@ -4,6 +4,7 @@ import type React from "react"
 
 import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabase"
+import { useAuth } from "@/contexts/auth-context"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -43,6 +44,7 @@ interface EquipmentManagementProps {
 }
 
 export default function EquipmentManagement({ onEquipmentUpdated }: EquipmentManagementProps) {
+  const { profile } = useAuth()
   const [equipments, setEquipments] = useState<Equipment[]>([])
   const [accessories, setAccessories] = useState<Accessory[]>([])
   const [loading, setLoading] = useState(true)
@@ -57,10 +59,18 @@ export default function EquipmentManagement({ onEquipmentUpdated }: EquipmentMan
   const [equipmentAccessories, setEquipmentAccessories] = useState<Array<{ name: string; description: string }>>([])
   const [newAccessory, setNewAccessory] = useState({ name: "", description: "" })
 
+  const [isAdmin, setIsAdmin] = useState(false)
+
   useEffect(() => {
-    loadEquipments()
-    loadAccessories()
-  }, [])
+    setIsAdmin(profile?.role === "admin")
+  }, [profile])
+
+  useEffect(() => {
+    if (isAdmin) {
+      loadEquipments()
+      loadAccessories()
+    }
+  }, [isAdmin])
 
   const loadEquipments = async () => {
     try {
@@ -211,6 +221,18 @@ export default function EquipmentManagement({ onEquipmentUpdated }: EquipmentMan
 
   if (loading && equipments.length === 0) {
     return <div className="text-center py-8">Carregando equipamentos...</div>
+  }
+
+  if (!isAdmin) {
+    return (
+      <Card>
+        <CardContent className="p-6">
+          <Alert variant="destructive">
+            <AlertDescription>Apenas administradores podem gerenciar equipamentos.</AlertDescription>
+          </Alert>
+        </CardContent>
+      </Card>
+    )
   }
 
   return (

@@ -33,7 +33,7 @@ interface RentalFormProps {
 }
 
 export default function RentalForm({ onRentalCreated }: RentalFormProps) {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const [equipments, setEquipments] = useState<Equipment[]>([])
   const [accessories, setAccessories] = useState<Accessory[]>([])
   const [loading, setLoading] = useState(false)
@@ -47,10 +47,18 @@ export default function RentalForm({ onRentalCreated }: RentalFormProps) {
   })
   const [selectedAccessories, setSelectedAccessories] = useState<string[]>([])
 
+  const [hasPermission, setHasPermission] = useState(false)
+
   useEffect(() => {
-    loadEquipments()
-    loadAccessories()
-  }, [])
+    setHasPermission(profile?.role === "user" || profile?.role === "admin")
+  }, [profile])
+
+  useEffect(() => {
+    if (hasPermission) {
+      loadEquipments()
+      loadAccessories()
+    }
+  }, [hasPermission])
 
   const loadEquipments = async () => {
     try {
@@ -142,124 +150,134 @@ export default function RentalForm({ onRentalCreated }: RentalFormProps) {
 
   return (
     <Card className="max-w-2xl mx-auto">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <CalendarIcon className="h-5 w-5" />
-          Novo Empréstimo
-        </CardTitle>
-        <CardDescription>Registre um novo empréstimo de equipamento</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="equipment">Equipamento</Label>
-              <Select
-                value={formData.equipment_id}
-                onValueChange={(value) => {
-                  setFormData((prev) => ({ ...prev, equipment_id: value }))
-                  setSelectedAccessories([]) // Reset accessories when equipment changes
-                }}
-                required
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione um equipamento" />
-                </SelectTrigger>
-                <SelectContent>
-                  {equipments.map((equipment) => (
-                    <SelectItem key={equipment.id} value={equipment.id}>
-                      {equipment.name}
-                      {equipment.description && (
-                        <span className="text-sm text-gray-500 ml-2">- {equipment.description}</span>
-                      )}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {equipmentAccessories.length > 0 && (
-              <div className="space-y-3">
-                <Label className="text-base font-semibold">Acessórios Disponíveis</Label>
-                <div className="space-y-2 p-4 bg-gray-50 rounded-lg">
-                  {equipmentAccessories.map((accessory) => (
-                    <div key={accessory.id} className="flex items-center space-x-2">
-                      <Checkbox
-                        id={accessory.id}
-                        checked={selectedAccessories.includes(accessory.id)}
-                        onCheckedChange={(checked) => handleAccessoryChange(accessory.id, checked as boolean)}
-                      />
-                      <Label htmlFor={accessory.id} className="flex-1 cursor-pointer">
-                        <span className="font-medium">{accessory.name}</span>
-                        {accessory.description && (
-                          <span className="text-sm text-gray-600 ml-2">- {accessory.description}</span>
-                        )}
-                      </Label>
-                    </div>
-                  ))}
-                </div>
-                {selectedAccessories.length > 0 && (
-                  <p className="text-sm text-blue-600">{selectedAccessories.length} acessório(s) selecionado(s)</p>
-                )}
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="rental_date">Data de Retirada</Label>
-                <Input
-                  id="rental_date"
-                  type="date"
-                  value={formData.rental_date}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, rental_date: e.target.value }))}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="rental_time">Hora de Retirada</Label>
-                <div className="relative">
-                  <Clock className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                  <Input
-                    id="rental_time"
-                    type="time"
-                    value={formData.rental_time}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, rental_time: e.target.value }))}
-                    className="pl-10"
+      {hasPermission ? (
+        <>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CalendarIcon className="h-5 w-5" />
+              Novo Empréstimo
+            </CardTitle>
+            <CardDescription>Registre um novo empréstimo de equipamento</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="equipment">Equipamento</Label>
+                  <Select
+                    value={formData.equipment_id}
+                    onValueChange={(value) => {
+                      setFormData((prev) => ({ ...prev, equipment_id: value }))
+                      setSelectedAccessories([]) // Reset accessories when equipment changes
+                    }}
                     required
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione um equipamento" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {equipments.map((equipment) => (
+                        <SelectItem key={equipment.id} value={equipment.id}>
+                          {equipment.name}
+                          {equipment.description && (
+                            <span className="text-sm text-gray-500 ml-2">- {equipment.description}</span>
+                          )}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {equipmentAccessories.length > 0 && (
+                  <div className="space-y-3">
+                    <Label className="text-base font-semibold">Acessórios Disponíveis</Label>
+                    <div className="space-y-2 p-4 bg-gray-50 rounded-lg">
+                      {equipmentAccessories.map((accessory) => (
+                        <div key={accessory.id} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={accessory.id}
+                            checked={selectedAccessories.includes(accessory.id)}
+                            onCheckedChange={(checked) => handleAccessoryChange(accessory.id, checked as boolean)}
+                          />
+                          <Label htmlFor={accessory.id} className="flex-1 cursor-pointer">
+                            <span className="font-medium">{accessory.name}</span>
+                            {accessory.description && (
+                              <span className="text-sm text-gray-600 ml-2">- {accessory.description}</span>
+                            )}
+                          </Label>
+                        </div>
+                      ))}
+                    </div>
+                    {selectedAccessories.length > 0 && (
+                      <p className="text-sm text-blue-600">{selectedAccessories.length} acessório(s) selecionado(s)</p>
+                    )}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="rental_date">Data de Retirada</Label>
+                    <Input
+                      id="rental_date"
+                      type="date"
+                      value={formData.rental_date}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, rental_date: e.target.value }))}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="rental_time">Hora de Retirada</Label>
+                    <div className="relative">
+                      <Clock className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                      <Input
+                        id="rental_time"
+                        type="time"
+                        value={formData.rental_time}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, rental_time: e.target.value }))}
+                        className="pl-10"
+                        required
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="expected_return_date">Data Prevista de Devolução (Opcional)</Label>
+                  <Input
+                    id="expected_return_date"
+                    type="date"
+                    value={formData.expected_return_date}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, expected_return_date: e.target.value }))}
+                    min={formData.rental_date}
                   />
                 </div>
               </div>
-            </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="expected_return_date">Data Prevista de Devolução (Opcional)</Label>
-              <Input
-                id="expected_return_date"
-                type="date"
-                value={formData.expected_return_date}
-                onChange={(e) => setFormData((prev) => ({ ...prev, expected_return_date: e.target.value }))}
-                min={formData.rental_date}
-              />
-            </div>
-          </div>
+              {error && (
+                <Alert variant="destructive">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
 
-          {error && (
-            <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
+              {success && (
+                <Alert>
+                  <AlertDescription className="text-green-600">{success}</AlertDescription>
+                </Alert>
+              )}
 
-          {success && (
-            <Alert>
-              <AlertDescription className="text-green-600">{success}</AlertDescription>
-            </Alert>
-          )}
-
-          <Button type="submit" disabled={loading || !formData.equipment_id} className="w-full">
-            {loading ? "Registrando..." : "Registrar Empréstimo"}
-          </Button>
-        </form>
-      </CardContent>
+              <Button type="submit" disabled={loading || !formData.equipment_id} className="w-full">
+                {loading ? "Registrando..." : "Registrar Empréstimo"}
+              </Button>
+            </form>
+          </CardContent>
+        </>
+      ) : (
+        <CardContent className="p-6">
+          <Alert variant="destructive">
+            <AlertDescription>Você não tem permissão para criar empréstimos.</AlertDescription>
+          </Alert>
+        </CardContent>
+      )}
     </Card>
   )
 }
