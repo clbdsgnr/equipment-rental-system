@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { createContext, useContext, useEffect, useState } from "react"
 import type { User } from "@supabase/supabase-js"
 import { supabase } from "@/lib/supabase"
@@ -24,6 +23,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Verificar sessão atual
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null)
+      if (session?.user) {
+        ensureProfile(session.user)
+      }
       setLoading(false)
     })
 
@@ -32,11 +34,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       setUser(session?.user ?? null)
+      if (session?.user && event === "SIGNED_IN") {
+        await ensureProfile(session.user)
+      }
       setLoading(false)
     })
 
     return () => subscription.unsubscribe()
   }, [])
+
+  const ensureProfile = async (user: User) => {
+    try {
+      // Verificar se o perfil já existe
+      const { data: profile, error } = await supabase.from("profiles").select("id").eq("id", user.id).single()
+
+      if (error && error.code === "PGRST116") {
+        // Perfil não existe, criar um novo
+        const { error: insertError } = await supabase.from("profiles").insert({
+          id: user.id,
+          email: user.email || "",
+          name: user.user_metadata?.name || "Usuário",
+        })
+
+        if (insertError) {
+          console.error("Erro ao criar perfil:", insertError)
+        }
+      }
+    } catch (error) {
+      console.error("Erro ao verificar/criar perfil:", error)
+    }
+  }
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({
@@ -50,15 +77,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        data: {
+          name: name,
+        },
+      },
     })
 
     if (!error && data.user) {
-      // Criar perfil do usuário
-      await supabase.from("profiles").insert({
-        id: data.user.id,
-        email,
-        name,
-      })
+      // Tentar criar o perfil imediatamente
+      try {
+        await supabase.from("profiles").insert({
+          id: data.user.id,
+          email,
+          name,
+        })
+      } catch (profileError) {
+        console.error("Erro ao criar perfil durante signup:", profileError)
+      }
     }
 
     return { error }

@@ -20,14 +20,13 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
-import { Plus, Edit, Trash2 } from "lucide-react"
+import { Plus, Edit, Trash2, X } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
 interface Equipment {
   id: string
   name: string
   description: string | null
-  serial_number: string | null
   status: "available" | "rented" | "maintenance"
   created_at: string
 }
@@ -49,19 +48,14 @@ export default function EquipmentManagement({ onEquipmentUpdated }: EquipmentMan
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [isAccessoryDialogOpen, setIsAccessoryDialogOpen] = useState(false)
   const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null)
   const [formData, setFormData] = useState({
     name: "",
     description: "",
-    serial_number: "",
     status: "available" as const,
   })
-  const [accessoryFormData, setAccessoryFormData] = useState({
-    equipment_id: "",
-    name: "",
-    description: "",
-  })
+  const [equipmentAccessories, setEquipmentAccessories] = useState<Array<{ name: string; description: string }>>([])
+  const [newAccessory, setNewAccessory] = useState({ name: "", description: "" })
 
   useEffect(() => {
     loadEquipments()
@@ -98,42 +92,43 @@ export default function EquipmentManagement({ onEquipmentUpdated }: EquipmentMan
     setError("")
 
     try {
+      let equipmentId: string
+
       if (selectedEquipment) {
         // Atualizar equipamento
         const { error } = await supabase.from("equipments").update(formData).eq("id", selectedEquipment.id)
 
         if (error) throw error
+        equipmentId = selectedEquipment.id
+
+        // Remover acessórios existentes
+        await supabase.from("accessories").delete().eq("equipment_id", equipmentId)
       } else {
         // Criar novo equipamento
-        const { error } = await supabase.from("equipments").insert([formData])
+        const { data, error } = await supabase.from("equipments").insert([formData]).select().single()
 
         if (error) throw error
+        equipmentId = data.id
+      }
+
+      // Adicionar acessórios
+      if (equipmentAccessories.length > 0) {
+        const accessoriesToInsert = equipmentAccessories.map((acc) => ({
+          equipment_id: equipmentId,
+          name: acc.name,
+          description: acc.description,
+        }))
+
+        const { error: accessoryError } = await supabase.from("accessories").insert(accessoriesToInsert)
+
+        if (accessoryError) throw accessoryError
       }
 
       await loadEquipments()
+      await loadAccessories()
       onEquipmentUpdated()
       setIsDialogOpen(false)
       resetForm()
-    } catch (error: any) {
-      setError(error.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleAccessorySubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setError("")
-
-    try {
-      const { error } = await supabase.from("accessories").insert([accessoryFormData])
-
-      if (error) throw error
-
-      await loadAccessories()
-      setIsAccessoryDialogOpen(false)
-      setAccessoryFormData({ equipment_id: "", name: "", description: "" })
     } catch (error: any) {
       setError(error.message)
     } finally {
@@ -150,6 +145,7 @@ export default function EquipmentManagement({ onEquipmentUpdated }: EquipmentMan
       if (error) throw error
 
       await loadEquipments()
+      await loadAccessories()
       onEquipmentUpdated()
     } catch (error: any) {
       setError(error.message)
@@ -160,9 +156,10 @@ export default function EquipmentManagement({ onEquipmentUpdated }: EquipmentMan
     setFormData({
       name: "",
       description: "",
-      serial_number: "",
       status: "available",
     })
+    setEquipmentAccessories([])
+    setNewAccessory({ name: "", description: "" })
     setSelectedEquipment(null)
   }
 
@@ -171,10 +168,25 @@ export default function EquipmentManagement({ onEquipmentUpdated }: EquipmentMan
     setFormData({
       name: equipment.name,
       description: equipment.description || "",
-      serial_number: equipment.serial_number || "",
       status: equipment.status,
     })
+
+    // Carregar acessórios do equipamento
+    const equipmentAccs = accessories.filter((acc) => acc.equipment_id === equipment.id)
+    setEquipmentAccessories(equipmentAccs.map((acc) => ({ name: acc.name, description: acc.description || "" })))
+
     setIsDialogOpen(true)
+  }
+
+  const addAccessory = () => {
+    if (newAccessory.name.trim()) {
+      setEquipmentAccessories([...equipmentAccessories, { ...newAccessory }])
+      setNewAccessory({ name: "", description: "" })
+    }
+  }
+
+  const removeAccessory = (index: number) => {
+    setEquipmentAccessories(equipmentAccessories.filter((_, i) => i !== index))
   }
 
   const getStatusBadge = (status: string) => {
@@ -209,67 +221,6 @@ export default function EquipmentManagement({ onEquipmentUpdated }: EquipmentMan
           <p className="text-gray-600">Cadastre e gerencie equipamentos e seus acessórios</p>
         </div>
         <div className="space-x-2">
-          <Dialog open={isAccessoryDialogOpen} onOpenChange={setIsAccessoryDialogOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline">
-                <Plus className="h-4 w-4 mr-2" />
-                Acessório
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Adicionar Acessório</DialogTitle>
-                <DialogDescription>Adicione um novo acessório para um equipamento</DialogDescription>
-              </DialogHeader>
-              <form onSubmit={handleAccessorySubmit} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="equipment_select">Equipamento</Label>
-                  <Select
-                    value={accessoryFormData.equipment_id}
-                    onValueChange={(value) => setAccessoryFormData((prev) => ({ ...prev, equipment_id: value }))}
-                    required
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione um equipamento" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {equipments.map((equipment) => (
-                        <SelectItem key={equipment.id} value={equipment.id}>
-                          {equipment.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="accessory_name">Nome do Acessório</Label>
-                  <Input
-                    id="accessory_name"
-                    value={accessoryFormData.name}
-                    onChange={(e) => setAccessoryFormData((prev) => ({ ...prev, name: e.target.value }))}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="accessory_description">Descrição</Label>
-                  <Textarea
-                    id="accessory_description"
-                    value={accessoryFormData.description}
-                    onChange={(e) => setAccessoryFormData((prev) => ({ ...prev, description: e.target.value }))}
-                  />
-                </div>
-                {error && (
-                  <Alert variant="destructive">
-                    <AlertDescription>{error}</AlertDescription>
-                  </Alert>
-                )}
-                <Button type="submit" disabled={loading}>
-                  {loading ? "Salvando..." : "Salvar Acessório"}
-                </Button>
-              </form>
-            </DialogContent>
-          </Dialog>
-
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
               <Button onClick={resetForm}>
@@ -277,65 +228,106 @@ export default function EquipmentManagement({ onEquipmentUpdated }: EquipmentMan
                 Novo Equipamento
               </Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>{selectedEquipment ? "Editar Equipamento" : "Novo Equipamento"}</DialogTitle>
                 <DialogDescription>
                   {selectedEquipment
-                    ? "Edite as informações do equipamento"
-                    : "Adicione um novo equipamento ao sistema"}
+                    ? "Edite as informações do equipamento e seus acessórios"
+                    : "Adicione um novo equipamento ao sistema e seus acessórios"}
                 </DialogDescription>
               </DialogHeader>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="name">Nome</Label>
-                  <Input
-                    id="name"
-                    value={formData.name}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
-                    required
-                  />
+              <form onSubmit={handleSubmit} className="space-y-6">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="name">Nome</Label>
+                    <Input
+                      id="name"
+                      value={formData.name}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="description">Descrição</Label>
+                    <Textarea
+                      id="description"
+                      value={formData.description}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, description: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="status">Status</Label>
+                    <Select
+                      value={formData.status}
+                      onValueChange={(value: "available" | "rented" | "maintenance") =>
+                        setFormData((prev) => ({ ...prev, status: value }))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="available">Disponível</SelectItem>
+                        <SelectItem value="rented">Emprestado</SelectItem>
+                        <SelectItem value="maintenance">Manutenção</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="description">Descrição</Label>
-                  <Textarea
-                    id="description"
-                    value={formData.description}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, description: e.target.value }))}
-                  />
+
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-base font-semibold">Acessórios</Label>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Nome do acessório"
+                        value={newAccessory.name}
+                        onChange={(e) => setNewAccessory((prev) => ({ ...prev, name: e.target.value }))}
+                      />
+                      <Input
+                        placeholder="Descrição (opcional)"
+                        value={newAccessory.description}
+                        onChange={(e) => setNewAccessory((prev) => ({ ...prev, description: e.target.value }))}
+                      />
+                      <Button type="button" onClick={addAccessory} size="sm">
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  {equipmentAccessories.length > 0 && (
+                    <div className="space-y-2">
+                      <Label className="text-sm text-gray-600">Acessórios adicionados:</Label>
+                      <div className="space-y-2">
+                        {equipmentAccessories.map((accessory, index) => (
+                          <div key={index} className="flex items-center justify-between bg-gray-50 p-2 rounded">
+                            <div>
+                              <span className="font-medium">{accessory.name}</span>
+                              {accessory.description && (
+                                <span className="text-sm text-gray-600 ml-2">- {accessory.description}</span>
+                              )}
+                            </div>
+                            <Button type="button" variant="ghost" size="sm" onClick={() => removeAccessory(index)}>
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="serial_number">Número de Série</Label>
-                  <Input
-                    id="serial_number"
-                    value={formData.serial_number}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, serial_number: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="status">Status</Label>
-                  <Select
-                    value={formData.status}
-                    onValueChange={(value: "available" | "rented" | "maintenance") =>
-                      setFormData((prev) => ({ ...prev, status: value }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="available">Disponível</SelectItem>
-                      <SelectItem value="rented">Emprestado</SelectItem>
-                      <SelectItem value="maintenance">Manutenção</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+
                 {error && (
                   <Alert variant="destructive">
                     <AlertDescription>{error}</AlertDescription>
                   </Alert>
                 )}
-                <Button type="submit" disabled={loading}>
+
+                <Button type="submit" disabled={loading} className="w-full">
                   {loading ? "Salvando..." : selectedEquipment ? "Atualizar" : "Criar"}
                 </Button>
               </form>
@@ -355,7 +347,6 @@ export default function EquipmentManagement({ onEquipmentUpdated }: EquipmentMan
               <TableRow>
                 <TableHead>Nome</TableHead>
                 <TableHead>Descrição</TableHead>
-                <TableHead>Número de Série</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Acessórios</TableHead>
                 <TableHead>Ações</TableHead>
@@ -368,7 +359,6 @@ export default function EquipmentManagement({ onEquipmentUpdated }: EquipmentMan
                   <TableRow key={equipment.id}>
                     <TableCell className="font-medium">{equipment.name}</TableCell>
                     <TableCell>{equipment.description || "-"}</TableCell>
-                    <TableCell>{equipment.serial_number || "-"}</TableCell>
                     <TableCell>{getStatusBadge(equipment.status)}</TableCell>
                     <TableCell>
                       {equipmentAccessories.length > 0 ? (

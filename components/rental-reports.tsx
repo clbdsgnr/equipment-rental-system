@@ -1,18 +1,14 @@
 "use client"
-
 import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabase"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Textarea } from "@/components/ui/textarea"
-import { FileText, Calendar, Clock } from "lucide-react"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Badge } from "@/components/ui/badge"
+import { FileText, Download, Search } from "lucide-react"
 
 interface RentalReport {
   id: string
@@ -22,75 +18,87 @@ interface RentalReport {
   equipment_description: string | null
   rental_date: string
   rental_time: string
+  return_date: string | null
+  return_time: string | null
   expected_return_date: string | null
-  actual_return_date: string | null
-  actual_return_time: string | null
   accessories_taken: boolean
-  accessories_list: string[] | null
+  accessories_list: string[]
   accessories_names: string[]
-  return_observations: string | null
   status: "active" | "returned" | "overdue"
+  observations: string | null
 }
 
 export default function RentalReports() {
   const [rentals, setRentals] = useState<RentalReport[]>([])
+  const [filteredRentals, setFilteredRentals] = useState<RentalReport[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
-  const [selectedRental, setSelectedRental] = useState<RentalReport | null>(null)
-  const [isReturnDialogOpen, setIsReturnDialogOpen] = useState(false)
-  const [returnData, setReturnData] = useState({
-    return_date: new Date().toISOString().split("T")[0],
-    return_time: new Date().toTimeString().slice(0, 5),
-    observations: "",
-  })
   const [filters, setFilters] = useState({
-    status: "all",
     search: "",
+    status: "all",
+    dateFrom: "",
+    dateTo: "",
   })
 
   useEffect(() => {
     loadRentals()
   }, [])
 
+  useEffect(() => {
+    applyFilters()
+  }, [rentals, filters])
+
   const loadRentals = async () => {
     try {
-      const { data, error } = await supabase
+      setLoading(true)
+
+      // Buscar empréstimos com informações relacionadas
+      const { data: rentalsData, error: rentalsError } = await supabase
         .from("rentals")
         .select(`
           *,
-          profiles!rentals_user_id_fkey (name, email),
-          equipments!rentals_equipment_id_fkey (name, description)
+          profiles!inner(name, email),
+          equipments!inner(name, description)
         `)
         .order("created_at", { ascending: false })
 
-      if (error) throw error
+      if (rentalsError) throw rentalsError
 
-      // Buscar nomes dos acessórios
-      const accessoryIds = data?.flatMap((rental) => rental.accessories_list || []) || []
-      const { data: accessoriesData } = await supabase.from("accessories").select("id, name").in("id", accessoryIds)
+      // Buscar acessórios para cada empréstimo
+      const rentalsWithAccessories = await Promise.all(
+        (rentalsData || []).map(async (rental) => {
+          let accessoriesNames: string[] = []
 
-      const accessoriesMap = new Map(accessoriesData?.map((acc) => [acc.id, acc.name]) || [])
+          if (rental.accessories_list && rental.accessories_list.length > 0) {
+            const { data: accessoriesData } = await supabase
+              .from("accessories")
+              .select("name")
+              .in("id", rental.accessories_list)
 
-      const formattedRentals: RentalReport[] =
-        data?.map((rental) => ({
-          id: rental.id,
-          user_name: rental.profiles?.name || "N/A",
-          user_email: rental.profiles?.email || "N/A",
-          equipment_name: rental.equipments?.name || "N/A",
-          equipment_description: rental.equipments?.description,
-          rental_date: rental.rental_date,
-          rental_time: rental.rental_time,
-          expected_return_date: rental.expected_return_date,
-          actual_return_date: rental.actual_return_date,
-          actual_return_time: rental.actual_return_time,
-          accessories_taken: rental.accessories_taken,
-          accessories_list: rental.accessories_list,
-          accessories_names: rental.accessories_list?.map((id: string) => accessoriesMap.get(id) || id) || [],
-          return_observations: rental.return_observations,
-          status: rental.status,
-        })) || []
+            accessoriesNames = accessoriesData?.map((acc) => acc.name) || []
+          }
 
-      setRentals(formattedRentals)
+          return {
+            id: rental.id,
+            user_name: rental.profiles.name,
+            user_email: rental.profiles.email,
+            equipment_name: rental.equipments.name,
+            equipment_description: rental.equipments.description,
+            rental_date: rental.rental_date,
+            rental_time: rental.rental_time,
+            return_date: rental.return_date,
+            return_time: rental.return_time,
+            expected_return_date: rental.expected_return_date,
+            accessories_taken: rental.accessories_taken,
+            accessories_list: rental.accessories_list || [],
+            accessories_names: accessoriesNames,
+            status: rental.status,
+            observations: rental.observations,
+          }
+        }),
+      )
+
+      setRentals(rentalsWithAccessories)
     } catch (error: any) {
       setError(error.message)
     } finally {
@@ -98,140 +106,206 @@ export default function RentalReports() {
     }
   }
 
-  const handleReturn = async () => {
-    if (!selectedRental) return
+  const applyFilters = () => {
+    let filtered = [...rentals]
 
-    setLoading(true)
-    setError("")
-
-    try {
-      // Atualizar o empréstimo
-      const { error: rentalError } = await supabase
-        .from("rentals")
-        .update({
-          actual_return_date: returnData.return_date,
-          actual_return_time: returnData.return_time,
-          return_observations: returnData.observations,
-          status: "returned",
-        })
-        .eq("id", selectedRental.id)
-
-      if (rentalError) throw rentalError
-
-      // Atualizar status do equipamento para 'available'
-      const { error: equipmentError } = await supabase
-        .from("equipments")
-        .update({ status: "available" })
-        .eq("name", selectedRental.equipment_name)
-
-      if (equipmentError) throw equipmentError
-
-      await loadRentals()
-      setIsReturnDialogOpen(false)
-      setSelectedRental(null)
-      setReturnData({
-        return_date: new Date().toISOString().split("T")[0],
-        return_time: new Date().toTimeString().slice(0, 5),
-        observations: "",
-      })
-    } catch (error: any) {
-      setError(error.message)
-    } finally {
-      setLoading(false)
+    // Filtro de busca
+    if (filters.search) {
+      const searchLower = filters.search.toLowerCase()
+      filtered = filtered.filter(
+        (rental) =>
+          rental.user_name.toLowerCase().includes(searchLower) ||
+          rental.user_email.toLowerCase().includes(searchLower) ||
+          rental.equipment_name.toLowerCase().includes(searchLower),
+      )
     }
+
+    // Filtro de status
+    if (filters.status !== "all") {
+      filtered = filtered.filter((rental) => rental.status === filters.status)
+    }
+
+    // Filtro de data
+    if (filters.dateFrom) {
+      filtered = filtered.filter((rental) => rental.rental_date >= filters.dateFrom)
+    }
+    if (filters.dateTo) {
+      filtered = filtered.filter((rental) => rental.rental_date <= filters.dateTo)
+    }
+
+    setFilteredRentals(filtered)
+  }
+
+  const exportToCSV = () => {
+    const headers = [
+      "Nome do Usuário",
+      "Email",
+      "Equipamento",
+      "Descrição do Equipamento",
+      "Acessórios Retirados",
+      "Lista de Acessórios",
+      "Data de Retirada",
+      "Hora de Retirada",
+      "Data de Devolução",
+      "Hora de Devolução",
+      "Data Prevista de Devolução",
+      "Status",
+      "Observações",
+    ]
+
+    const csvContent = [
+      headers.join(","),
+      ...filteredRentals.map((rental) =>
+        [
+          `"${rental.user_name}"`,
+          `"${rental.user_email}"`,
+          `"${rental.equipment_name}"`,
+          `"${rental.equipment_description || ""}"`,
+          rental.accessories_taken ? "Sim" : "Não",
+          `"${rental.accessories_names.join(", ")}"`,
+          rental.rental_date,
+          rental.rental_time,
+          rental.return_date || "",
+          rental.return_time || "",
+          rental.expected_return_date || "",
+          rental.status,
+          `"${rental.observations || ""}"`,
+        ].join(","),
+      ),
+    ].join("\n")
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+    const link = document.createElement("a")
+    const url = URL.createObjectURL(blob)
+    link.setAttribute("href", url)
+    link.setAttribute("download", `relatorio-emprestimos-${new Date().toISOString().split("T")[0]}.csv`)
+    link.style.visibility = "hidden"
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
   }
 
   const getStatusBadge = (status: string) => {
-    const variants = {
-      active: "default",
-      returned: "secondary",
-      overdue: "destructive",
-    } as const
-
-    const labels = {
-      active: "Ativo",
-      returned: "Devolvido",
-      overdue: "Atrasado",
+    switch (status) {
+      case "active":
+        return <Badge variant="default">Ativo</Badge>
+      case "returned":
+        return <Badge variant="secondary">Devolvido</Badge>
+      case "overdue":
+        return <Badge variant="destructive">Atrasado</Badge>
+      default:
+        return <Badge variant="outline">{status}</Badge>
     }
-
-    return <Badge variant={variants[status as keyof typeof variants]}>{labels[status as keyof typeof labels]}</Badge>
   }
 
-  const filteredRentals = rentals.filter((rental) => {
-    const matchesStatus = filters.status === "all" || rental.status === filters.status
-    const matchesSearch =
-      rental.user_name.toLowerCase().includes(filters.search.toLowerCase()) ||
-      rental.equipment_name.toLowerCase().includes(filters.search.toLowerCase()) ||
-      rental.user_email.toLowerCase().includes(filters.search.toLowerCase())
-
-    return matchesStatus && matchesSearch
-  })
-
-  const openReturnDialog = (rental: RentalReport) => {
-    setSelectedRental(rental)
-    setIsReturnDialogOpen(true)
+  const formatDate = (date: string | null) => {
+    if (!date) return "-"
+    return new Date(date).toLocaleDateString("pt-BR")
   }
 
-  if (loading && rentals.length === 0) {
-    return <div className="text-center py-8">Carregando relatórios...</div>
+  const formatTime = (time: string | null) => {
+    if (!time) return "-"
+    return time
+  }
+
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="flex items-center justify-center p-6">
+          <div className="text-center">Carregando relatórios...</div>
+        </CardContent>
+      </Card>
+    )
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold flex items-center gap-2">
-            <FileText className="h-6 w-6" />
-            Relatórios de Empréstimos
-          </h2>
-          <p className="text-gray-600">Histórico completo de todos os empréstimos</p>
-        </div>
-      </div>
-
-      {/* Filtros */}
       <Card>
         <CardHeader>
-          <CardTitle>Filtros</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <FileText className="h-5 w-5" />
+            Relatório de Empréstimos
+          </CardTitle>
+          <CardDescription>Visualize e exporte relatórios completos de empréstimos de equipamentos</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="search">Buscar</Label>
-              <Input
-                id="search"
-                placeholder="Nome do usuário, equipamento ou email..."
-                value={filters.search}
-                onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
-              />
+          <div className="space-y-4">
+            {/* Filtros */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="search">Buscar</Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                  <Input
+                    id="search"
+                    placeholder="Nome, email ou equipamento..."
+                    value={filters.search}
+                    onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
+                    className="pl-10"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="status">Status</Label>
+                <Select
+                  value={filters.status}
+                  onValueChange={(value) => setFilters((prev) => ({ ...prev, status: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="active">Ativo</SelectItem>
+                    <SelectItem value="returned">Devolvido</SelectItem>
+                    <SelectItem value="overdue">Atrasado</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="dateFrom">Data Inicial</Label>
+                <Input
+                  id="dateFrom"
+                  type="date"
+                  value={filters.dateFrom}
+                  onChange={(e) => setFilters((prev) => ({ ...prev, dateFrom: e.target.value }))}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="dateTo">Data Final</Label>
+                <Input
+                  id="dateTo"
+                  type="date"
+                  value={filters.dateTo}
+                  onChange={(e) => setFilters((prev) => ({ ...prev, dateTo: e.target.value }))}
+                />
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="status">Status</Label>
-              <Select
-                value={filters.status}
-                onValueChange={(value) => setFilters((prev) => ({ ...prev, status: value }))}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos</SelectItem>
-                  <SelectItem value="active">Ativos</SelectItem>
-                  <SelectItem value="returned">Devolvidos</SelectItem>
-                  <SelectItem value="overdue">Atrasados</SelectItem>
-                </SelectContent>
-              </Select>
+
+            <div className="flex justify-between items-center">
+              <p className="text-sm text-gray-600">{filteredRentals.length} empréstimo(s) encontrado(s)</p>
+              <Button onClick={exportToCSV} variant="outline" className="flex items-center gap-2 bg-transparent">
+                <Download className="h-4 w-4" />
+                Exportar CSV
+              </Button>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Tabela de relatórios */}
+      {error && (
+        <Card>
+          <CardContent className="p-6">
+            <div className="text-red-600">Erro: {error}</div>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
-        <CardHeader>
-          <CardTitle>Histórico de Empréstimos</CardTitle>
-          <CardDescription>{filteredRentals.length} empréstimo(s) encontrado(s)</CardDescription>
-        </CardHeader>
-        <CardContent>
+        <CardContent className="p-0">
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
@@ -242,7 +316,7 @@ export default function RentalReports() {
                   <TableHead>Data/Hora Retirada</TableHead>
                   <TableHead>Data/Hora Devolução</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Ações</TableHead>
+                  <TableHead>Observações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -263,51 +337,28 @@ export default function RentalReports() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      {rental.accessories_taken ? (
-                        <div className="space-y-1">
-                          {rental.accessories_names.map((name, index) => (
-                            <Badge key={index} variant="outline" className="mr-1">
-                              {name}
-                            </Badge>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="text-gray-500">Não</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1 text-sm">
-                        <Calendar className="h-4 w-4" />
-                        {new Date(rental.rental_date).toLocaleDateString("pt-BR")}
-                      </div>
-                      <div className="flex items-center gap-1 text-sm text-gray-500">
-                        <Clock className="h-4 w-4" />
-                        {rental.rental_time}
+                      <div>
+                        <div className="text-sm">{rental.accessories_taken ? "Sim" : "Não"}</div>
+                        {rental.accessories_names.length > 0 && (
+                          <div className="text-xs text-gray-500">{rental.accessories_names.join(", ")}</div>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell>
-                      {rental.actual_return_date ? (
-                        <div>
-                          <div className="flex items-center gap-1 text-sm">
-                            <Calendar className="h-4 w-4" />
-                            {new Date(rental.actual_return_date).toLocaleDateString("pt-BR")}
-                          </div>
-                          <div className="flex items-center gap-1 text-sm text-gray-500">
-                            <Clock className="h-4 w-4" />
-                            {rental.actual_return_time}
-                          </div>
-                        </div>
-                      ) : (
-                        <span className="text-gray-500">Não devolvido</span>
-                      )}
+                      <div className="text-sm">
+                        <div>{formatDate(rental.rental_date)}</div>
+                        <div className="text-gray-500">{formatTime(rental.rental_time)}</div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm">
+                        <div>{formatDate(rental.return_date)}</div>
+                        <div className="text-gray-500">{formatTime(rental.return_time)}</div>
+                      </div>
                     </TableCell>
                     <TableCell>{getStatusBadge(rental.status)}</TableCell>
                     <TableCell>
-                      {rental.status === "active" && (
-                        <Button variant="outline" size="sm" onClick={() => openReturnDialog(rental)}>
-                          Devolver
-                        </Button>
-                      )}
+                      <div className="text-sm max-w-xs truncate">{rental.observations || "-"}</div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -316,60 +367,6 @@ export default function RentalReports() {
           </div>
         </CardContent>
       </Card>
-
-      {/* Dialog de devolução */}
-      <Dialog open={isReturnDialogOpen} onOpenChange={setIsReturnDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Registrar Devolução</DialogTitle>
-            <DialogDescription>Registre a devolução do equipamento {selectedRental?.equipment_name}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="return_date">Data de Devolução</Label>
-                <Input
-                  id="return_date"
-                  type="date"
-                  value={returnData.return_date}
-                  onChange={(e) => setReturnData((prev) => ({ ...prev, return_date: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="return_time">Hora de Devolução</Label>
-                <Input
-                  id="return_time"
-                  type="time"
-                  value={returnData.return_time}
-                  onChange={(e) => setReturnData((prev) => ({ ...prev, return_time: e.target.value }))}
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="observations">Observações</Label>
-              <Textarea
-                id="observations"
-                placeholder="Observações sobre a devolução (opcional)"
-                value={returnData.observations}
-                onChange={(e) => setReturnData((prev) => ({ ...prev, observations: e.target.value }))}
-              />
-            </div>
-            {error && (
-              <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-            <div className="flex justify-end space-x-2">
-              <Button variant="outline" onClick={() => setIsReturnDialogOpen(false)}>
-                Cancelar
-              </Button>
-              <Button onClick={handleReturn} disabled={loading}>
-                {loading ? "Registrando..." : "Registrar Devolução"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }
