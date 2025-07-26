@@ -62,10 +62,10 @@ export default function AuthPage() {
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="signin" className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="signin">Entrar</TabsTrigger>
-              <TabsTrigger value="signup">Cadastrar</TabsTrigger>
-            </TabsList>
+           {/* <TabsList className="grid w-full grid-cols-2">
+               <TabsTrigger value="signin">Entrar</TabsTrigger>
+              {/*<TabsTrigger value="signup">Cadastrar</TabsTrigger>
+            </TabsList>*/}
 
             <TabsContent value="signin">
               <form onSubmit={handleSignIn} className="space-y-4">
@@ -94,7 +94,7 @@ export default function AuthPage() {
               </form>
             </TabsContent>
 
-            <TabsContent value="signup">
+            {/*<TabsContent value="signup">
               <form onSubmit={handleSignUp} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="name">Nome</Label>
@@ -123,7 +123,7 @@ export default function AuthPage() {
                   {loading ? "Cadastrando..." : "Cadastrar"}
                 </Button>
               </form>
-            </TabsContent>
+            </TabsContent>*/}
           </Tabs>
         </CardContent>
       </Card>
